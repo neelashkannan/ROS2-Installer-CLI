@@ -40,8 +40,7 @@ from contextlib import contextmanager
 
 # Version and metadata
 __version__ = "2.1.0"
-__author__ = "ROS2 Installation Team"
-__license__ = "Apache 2.0"
+__author__ = "neelash"
 
 @dataclass
 class InstallationResult:
