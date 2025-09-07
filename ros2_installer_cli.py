@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ROS2 Kilted Kaiju CLI Professional Installer
+ROS2 Kilted Kaiju CLI Installer
 ============================================
 
 Production-grade ROS2 installation system - CLI Only Version
@@ -16,9 +16,8 @@ Features:
 - Cross-platform compatibility
 - Silent automation support
 
-Author: ROS2 Installation Team
+Author: neelash kannan
 Version: 2.1.0 (CLI-Only)
-License: Apache 2.0
 """
 
 import os
@@ -40,7 +39,7 @@ from contextlib import contextmanager
 
 # Version and metadata
 __version__ = "2.1.0"
-__author__ = "neelash"
+__author__ = "neelash kannan"
 
 @dataclass
 class InstallationResult:
@@ -99,7 +98,7 @@ class CLIInstaller:
             'total_packages': 0
         }
         
-        self.logger.info(f"🚀 ROS2 CLI Professional Installer v{__version__}")
+        self.logger.info(f"🚀 ROS2 CLI Installer v{__version__}")
         self.logger.info(f"Session ID: {self.session_id}")
         self.logger.info(f"System: {self.system_info.os_name} {self.system_info.os_version}")
     
@@ -675,7 +674,7 @@ class CLIInstaller:
         
         # Add ROS2 setup to bashrc
         ros2_setup = f"""
-# ROS2 {distro.title()} Setup - Added by CLI Professional Installer
+# ROS2 {distro.title()} Setup - Added by CLI Installer
 source /opt/ros/{distro}/setup.bash
 export ROS_DOMAIN_ID=0
 export ROS_LOCALHOST_ONLY=0
@@ -735,7 +734,7 @@ source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash
 def create_arg_parser() -> argparse.ArgumentParser:
     """Create command-line argument parser."""
     parser = argparse.ArgumentParser(
-        description="ROS2 Kilted Kaiju CLI Professional Installer",
+        description="ROS2 Kilted Kaiju CLI Installer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -750,7 +749,7 @@ Examples:
     parser.add_argument(
         '--version', 
         action='version', 
-        version=f'ROS2 CLI Professional Installer v{__version__}'
+        version=f'ROS2 CLI Installer v{__version__}'
     )
     
     parser.add_argument(
@@ -850,7 +849,7 @@ def main():
             sys.exit(0 if is_valid else 1)
         
         # Run installation
-        installer.logger.info("📟 Running CLI Professional Installer...")
+        installer.logger.info("📟 Running CLI Installer...")
         result = installer.install_ros2(silent=args.silent)
         
         if result.success:

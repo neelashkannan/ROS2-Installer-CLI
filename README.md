@@ -87,7 +87,7 @@ performance:
 ## Command-Line Options
 
 ```bash
-ROS2 Kilted Kaiju CLI Professional Installer
+ROS2 Kilted Kaiju CLI Installer
 
 Options:
   -h, --help           Show help message and exit
