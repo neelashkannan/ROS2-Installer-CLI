@@ -3,18 +3,7 @@
 ROS2 Kilted Kaiju CLI Installer
 ============================================
 
-Production-grade ROS2 installation system - CLI Only Version
-Focused on command-line automation with enterprise features.
-
-Features:
-- Configuration-driven installation
-- Robust error handling and recovery
-- Parallel processing and optimization
-- Enterprise deployment support
-- Comprehensive logging and monitoring
-- Security and validation
-- Cross-platform compatibility
-- Silent automation support
+Simple ROS2 installation system for command-line use.
 
 Author: neelash kannan
 Version: 2.1.0 (CLI-Only)
