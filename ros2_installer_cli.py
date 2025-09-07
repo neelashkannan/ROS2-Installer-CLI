@@ -147,7 +147,7 @@ class CLIInstaller:
                 'min_disk_space_gb': 4,
                 'min_memory_gb': 2,
                 'required_ubuntu_version': '24.04',
-                'supported_architectures': ['amd64', 'arm64', 'aarch64']
+                'supported_architectures': ['amd64', 'arm64', 'aarch64','x86_64']
             },
             'performance': {
                 'parallel_downloads': True,
