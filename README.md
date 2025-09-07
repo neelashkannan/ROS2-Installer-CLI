@@ -184,3 +184,18 @@ ros2 --help
 # Run a simple test
 ros2 run demo_nodes_cpp talker
 ```
+
+---
+
+## Author
+
+**Neelash Kannan**  
+📧 Email: [neelashkannan@outlook.com](mailto:neelashkannan@outlook.com)  
+🐙 GitHub: [neelashkannan](https://github.com/neelashkannan)  
+📂 Repository: [ROS2-Installer-CLI](https://github.com/neelashkannan/ROS2-Installer-CLI)
+
+### Contributing
+Feel free to open issues or submit pull requests to improve this installer. Your contributions are welcome!
+
+### License
+This project is open source. Please check the repository for license details.
