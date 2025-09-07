@@ -197,5 +197,3 @@ ros2 run demo_nodes_cpp talker
 ### Contributing
 Feel free to open issues or submit pull requests to improve this installer. Your contributions are welcome!
 
-### License
-This project is open source. Please check the repository for license details.
