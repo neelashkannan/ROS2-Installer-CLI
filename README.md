@@ -20,7 +20,7 @@ brew install ros2-installer
 ros2-installer --help
 ```
 
-> **Note:** Homebrew installation works best on x86_64 systems. For ARM64 systems (like Apple Silicon Macs or ARM-based Linux), you may need to use the manual installation method below.
+> **Note:** Homebrew installation works best on x86_64 systems. For ARM64 systems (like Apple Silicon Macs or ARM-based Linux), **manual installation is recommended** due to Homebrew's limited ARM64 support.
 
 ### 📦 Manual Installation
 ```bash
