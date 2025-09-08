@@ -10,8 +10,8 @@ Command-line installer for ROS2 Kilted Kaiju distribution. This CLI-only version
 
 ### 🍺 Homebrew Installation (Recommended)
 ```bash
-# Add the tap (if using a custom tap)
-brew tap your-username/ros-installer
+# Add the tap
+brew tap neelashkannan/ros-installer
 
 # Install via Homebrew
 brew install ros2-installer
@@ -20,11 +20,13 @@ brew install ros2-installer
 ros2-installer --help
 ```
 
+> **Note:** Homebrew installation works best on x86_64 systems. For ARM64 systems (like Apple Silicon Macs or ARM-based Linux), you may need to use the manual installation method below.
+
 ### 📦 Manual Installation
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/ros_installer.git
-cd ros_installer
+git clone https://github.com/neelashkannan/ROS2-Installer-CLI.git
+cd ROS2-Installer-CLI
 
 # Install dependencies
 pip3 install -r requirements.txt
