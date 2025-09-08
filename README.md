@@ -1,28 +1,26 @@
 # ROS2 Kilted Kaiju CLI Installer
 
-## Overview
+A production-grade command-line installer for ROS2 Kilted Kaiju distribution, designed for automation, server environments, and headless installations.
 
-Command-line installer for ROS2 Kilted Kaiju distribution. This CLI-only version is designed for automation, server environments, and headless installations.
+## 🚀 Quick Start
 
----
+### Installation Methods
 
-## Installation Methods
-
-### 🍺 Homebrew Installation (Recommended)
+#### 🍺 Homebrew Installation (x86_64 Recommended)
 ```bash
 # Add the tap
 brew tap neelashkannan/ros-installer
 
-# Install via Homebrew
+# Install the tool
 brew install ros2-installer
 
-# Verify installation
-ros2-installer --help
+# Use it
+sudo ros2-installer --help
 ```
 
-> **Note:** Homebrew installation works best on x86_64 systems. For ARM64 systems (like Apple Silicon Macs or ARM-based Linux), **manual installation is recommended** due to Homebrew's limited ARM64 support.
+> **Note:** Homebrew installation works best on x86_64 systems. For ARM64 systems (like Apple Silicon Macs or ARM-based Linux), manual installation is recommended due to Homebrew's limited ARM64 support.
 
-### 📦 Manual Installation
+#### 📦 Manual Installation (All Architectures)
 ```bash
 # Clone the repository
 git clone https://github.com/neelashkannan/ROS2-Installer-CLI.git
@@ -31,67 +29,56 @@ cd ROS2-Installer-CLI
 # Install dependencies
 pip3 install -r requirements.txt
 
-# Standard installation with prompts
-sudo python3 ros2_installer_cli.py
-
-# Silent installation (no prompts)
-sudo python3 ros2_installer_cli.py --silent
-
-# Specific package set
-sudo python3 ros2_installer_cli.py --package-set desktop --silent
+# Use the tool
+sudo python3 ros2_installer_cli.py --help
 ```
 
-## Quick Start
+### Basic Usage
 
-### 🚀 Basic Usage (Homebrew)
 ```bash
-# Standard installation with prompts
+# Interactive installation
 sudo ros2-installer
 
-# Silent installation (no prompts)
-sudo ros2-installer --silent
+# Silent installation with specific package set
+sudo ros2-installer --silent --package-set desktop
 
-# Specific package set
-sudo ros2-installer --package-set desktop --silent
-```
-
-### Validation & Testing
-```bash
 # Validate system requirements only
 sudo ros2-installer --validate-only
 
-# Dry run (simulate installation)
-sudo ros2-installer --dry-run
-
-# Show current configuration
-sudo ros2-installer --show-config
+# Show help
+ros2-installer --help
 ```
 
-### Custom Configuration
-```bash
-# Use custom config file
-sudo ros2-installer --config production.yaml
+## 📦 Package Sets
 
-# Override specific settings
-sudo ros2-installer --ros-distro humble --package-set base
-
-# High-performance installation
-sudo ros2-installer --parallel-jobs 8 --silent
-```
-
----
-
-## Configuration Options
-
-### Package Sets Available
 | Package Set | Description | Best For |
-|---|---|---|
+|-------------|-------------|----------|
 | **minimal** | Core ROS2 + CLI tools | Lightweight servers |
 | **base** | Standard ROS2 functionality | Basic development |
 | **desktop** | GUI tools included | Development workstations |
 | **desktop-full** | Complete development environment | Full robotics development |
 
+## ⚙️ Configuration
+
+### Command-Line Options
+
+```bash
+Options:
+  -h, --help           Show help message and exit
+  --version            Show version number
+  --config CONFIG      Configuration file path (default: config.yaml)
+  --package-set SET    Package set: minimal, base, desktop, desktop-full
+  --ros-distro DISTRO  ROS distribution: kilted, jazzy, iron, humble, rolling
+  --log-level LEVEL    Logging: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --silent             Silent installation (no user interaction)
+  --validate-only      Only validate system requirements
+  --dry-run            Simulate installation without changes
+  --show-config        Display current configuration
+  --parallel-jobs N    Number of parallel installation jobs
+```
+
 ### Configuration File Example
+
 ```yaml
 # config_cli.yaml
 installation:
@@ -117,58 +104,7 @@ performance:
   compression: true
 ```
 
----
-
-## Command-Line Options
-
-```bash
-ROS2 Kilted Kaiju CLI Installer
-
-Options:
-  -h, --help           Show help message and exit
-  --version            Show version number
-  --config CONFIG      Configuration file path (default: config.yaml)
-  --package-set SET    Package set: minimal, base, desktop, desktop-full
-  --ros-distro DISTRO  ROS distribution: kilted, jazzy, iron, humble, rolling
-  --log-level LEVEL    Logging: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  --silent             Silent installation (no user interaction)
-  --validate-only      Only validate system requirements
-  --dry-run            Simulate installation without changes
-  --show-config        Display current configuration
-  --parallel-jobs N    Number of parallel installation jobs
-```
-
----
-
-## Usage Examples
-
-### Basic Usage (Homebrew)
-```bash
-# Interactive installation
-sudo ros2-installer
-
-# Silent installation with specific package set
-sudo ros2-installer --silent --package-set desktop
-
-# Using custom configuration
-sudo ros2-installer --config custom.yaml --silent
-```
-
-### Basic Usage (Manual/Python)
-```bash
-# Interactive installation
-sudo python3 ros2_installer_cli.py
-
-# Silent installation with specific package set
-sudo python3 ros2_installer_cli.py --silent --package-set desktop
-
-# Using custom configuration
-sudo python3 ros2_installer_cli.py --config custom.yaml --silent
-```
-
----
-
-## System Requirements
+## 🖥️ System Requirements
 
 ### Minimum Requirements
 - **OS**: Ubuntu 24.04 LTS (Noble Numbat)
@@ -182,43 +118,48 @@ sudo python3 ros2_installer_cli.py --config custom.yaml --silent
 - **Disk**: 10 GB free space for complete development environment
 - **CPU**: Multi-core for parallel installation benefits
 
----
-
-## Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
 **Permission Denied**
 ```bash
 # Solution: Run with sudo
-sudo python3 ros2_installer_cli.py
+sudo ros2-installer
 ```
 
 **Package Not Found**
 ```bash
 # Solution: Update package index
 sudo apt-get update
-sudo python3 ros2_installer_cli.py --validate-only
+sudo ros2-installer --validate-only
 ```
 
 **Network Timeout**
 ```bash
 # Solution: Increase timeout in config
-sudo python3 ros2_installer_cli.py --config custom_config.yaml
+sudo ros2-installer --config custom_config.yaml
+```
+
+**ARM64 Homebrew Issues**
+```bash
+# Solution: Use manual installation
+git clone https://github.com/neelashkannan/ROS2-Installer-CLI.git
+cd ROS2-Installer-CLI
+pip3 install -r requirements.txt
+sudo python3 ros2_installer_cli.py
 ```
 
 ### Debug Mode
 ```bash
 # Enable detailed logging
-sudo python3 ros2_installer_cli.py --log-level DEBUG
+sudo ros2-installer --log-level DEBUG
 
 # Check installation logs
 tail -f /tmp/ros2_installation.log
 ```
 
----
-
-## Post-Installation
+## 📋 Post-Installation
 
 ### Verify Installation
 ```bash
@@ -232,15 +173,52 @@ ros2 --help
 ros2 run demo_nodes_cpp talker
 ```
 
----
+## 🏗️ Architecture Support
 
-## Author
+| Architecture | Homebrew | Manual | Status |
+|-------------|----------|--------|--------|
+| x86_64 (Intel) | ✅ | ✅ | Fully Supported |
+| ARM64 (Apple Silicon) | ⚠️ | ✅ | Manual Recommended |
+| ARM64 (Linux) | ⚠️ | ✅ | Manual Recommended |
+
+## 📁 Project Structure
+
+```
+ROS2-Installer-CLI/
+├── ros2_installer_cli.py      # Main installer script
+├── config_cli.yaml            # Default configuration
+├── requirements.txt           # Python dependencies
+├── Formula/                   # Homebrew formula
+│   └── ros2-installer.rb
+└── README.md                  # This file
+```
+
+## 🎯 Features
+
+- **Cross-platform**: Works on x86_64 and ARM64 systems
+- **Multiple installation methods**: Homebrew and manual installation
+- **Flexible configuration**: Command-line options and YAML config files
+- **Package set selection**: Choose from minimal to desktop-full
+- **Silent installation**: Perfect for automation and CI/CD
+- **Validation mode**: Check system requirements without installing
+- **Parallel processing**: Faster installation with multiple jobs
+- **Comprehensive logging**: Debug and monitor installation process
+
+## 👨‍💻 Author
 
 **Neelash Kannan**  
 📧 Email: [neelashkannan@outlook.com](mailto:neelashkannan@outlook.com)  
 🐙 GitHub: [neelashkannan](https://github.com/neelashkannan)  
 📂 Repository: [ROS2-Installer-CLI](https://github.com/neelashkannan/ROS2-Installer-CLI)
 
-### Contributing
+## 🤝 Contributing
+
 Feel free to open issues or submit pull requests to improve this installer. Your contributions are welcome!
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+**Ready to install ROS2?** Choose your preferred method above and get started! 🚀
