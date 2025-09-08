@@ -1,8 +1,8 @@
 class Ros2Installer < Formula
   desc "ROS2 Kilted Kaiju CLI Installer - Production-grade ROS2 installation tool"
-  homepage "https://github.com/your-username/ros_installer"
-  url "https://github.com/your-username/ros_installer/archive/refs/tags/v2.1.0.tar.gz"
-  sha256 "YOUR_SHA256_HERE"  # This will be replaced with actual SHA256 when you create a release
+  homepage "https://github.com/neelashkannan/ROS2-Installer-CLI"
+  url "https://github.com/neelashkannan/ROS2-Installer-CLI/releases/download/v2.1.0/release-v2.1.0.tar.gz"
+  sha256 "ca648748b4162d86e6f0549efe439021d5dc644e46fff76a40bb4be7ae795f8b"
   license "MIT"
   version "2.1.0"
 
@@ -66,7 +66,7 @@ class Ros2Installer < Formula
       
       Note: This installer requires sudo privileges to install ROS2 packages.
       
-      For more information, visit: https://github.com/your-username/ros_installer
+      For more information, visit: https://github.com/neelashkannan/ROS2-Installer-CLI
     EOS
   end
 end
