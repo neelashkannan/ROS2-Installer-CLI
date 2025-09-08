@@ -7,7 +7,6 @@ class Ros2Installer < Formula
   version "2.1.0"
 
   depends_on "python@3.11"
-  depends_on "pyyaml"
 
   def install
     # Install the main script
@@ -21,7 +20,7 @@ class Ros2Installer < Formula
     
     # Install Python dependencies
     system Formula["python@3.11"].opt_bin/"pip3", "install", 
-           "--target=#{libexec}", "psutil", "pyyaml"
+           "--target=#{libexec}", "psutil", "PyYAML"
     
     # Create a wrapper script that sets up the Python path
     (bin/"ros2-installer").write <<~EOS
