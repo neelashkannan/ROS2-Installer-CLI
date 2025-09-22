@@ -215,10 +215,6 @@ ROS2-Installer-CLI/
 
 Feel free to open issues or submit pull requests to improve this installer. Your contributions are welcome!
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ---
 
 **Ready to install ROS2?** Choose your preferred method above and get started! 🚀
