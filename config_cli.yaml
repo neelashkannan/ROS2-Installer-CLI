@@ -42,3 +42,9 @@ security:
   check_checksums: true
   secure_permissions: true
   audit_logging: true
+
+# Docker Configuration (used on non-Ubuntu systems)
+docker:
+  container_name: "ros2-kilted"
+  workspace_dir: "~/ros2_ws"
+  network_mode: "host"

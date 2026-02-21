@@ -9,21 +9,20 @@ Author: neelash kannan
 Version: 2.1.0 (CLI-Only)
 """
 
+import copy
 import os
 import sys
-import json
+import platform
+import shutil
 import yaml
 import time
 import uuid
 import argparse
 import logging
-import threading
 import subprocess
-import concurrent.futures
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from contextlib import contextmanager
 
 # Version and metadata
@@ -49,6 +48,9 @@ class SystemInfo:
     memory_gb: float
     disk_space_gb: float
     cpu_cores: int
+    is_ubuntu: bool = False
+    is_macos: bool = False
+    linux_distro: str = ""
 
 class ConfigurationError(Exception):
     """Configuration-related errors."""
@@ -65,10 +67,11 @@ class InstallationError(Exception):
 class CLIInstaller:
     """Production-grade CLI-only ROS2 installer with enterprise features."""
     
-    def __init__(self, config_file: str = "config.yaml"):
+    def __init__(self, config_file: str = "config_cli.yaml"):
         """Initialize the CLI installer."""
         self.session_id = str(uuid.uuid4())[:8]
         self.start_time = time.time()
+        self.logger = None  # Set early so error paths don't AttributeError
         self.config = self._load_configuration(config_file)
         self.logger = self._setup_logging()
         self.system_info = self._gather_system_info()
@@ -146,6 +149,11 @@ class CLIInstaller:
                 'check_checksums': True,
                 'secure_permissions': True,
                 'audit_logging': True
+            },
+            'docker': {
+                'container_name': 'ros2-kilted',
+                'workspace_dir': str(Path.home() / 'ros2_ws'),
+                'network_mode': 'host'
             }
         }
         
@@ -203,22 +211,22 @@ class CLIInstaller:
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)
         
-        # Add session ID to all log records
-        old_factory = logging.getLogRecordFactory()
-        def record_factory(*args, **kwargs):
-            record = old_factory(*args, **kwargs)
-            record.session_id = self.session_id
-            return record
-        logging.setLogRecordFactory(record_factory)
+        # Add session ID via a filter instead of global setLogRecordFactory
+        class SessionFilter(logging.Filter):
+            def __init__(self, session_id):
+                super().__init__()
+                self._session_id = session_id
+            def filter(self, record):
+                record.session_id = self._session_id
+                return True
+        logger.addFilter(SessionFilter(self.session_id))
         
         return logger
     
     def _gather_system_info(self) -> SystemInfo:
         """Gather comprehensive system information."""
         try:
-            import platform
-            import psutil
-            import shutil
+            import psutil  # type: ignore[import-untyped]
             
             os_name = platform.system()
             os_version = platform.release()
@@ -235,18 +243,55 @@ class CLIInstaller:
             # CPU information
             cpu_cores = psutil.cpu_count()
             
+            # Detect OS type
+            is_macos = (os_name == "Darwin")
+            is_ubuntu = False
+            linux_distro = ""
+            
+            if os_name == "Linux":
+                try:
+                    with open('/etc/os-release', 'r') as f:
+                        os_release = f.read().lower()
+                        if 'ubuntu' in os_release:
+                            is_ubuntu = True
+                            linux_distro = "ubuntu"
+                        elif 'debian' in os_release:
+                            linux_distro = "debian"
+                        elif 'fedora' in os_release:
+                            linux_distro = "fedora"
+                        elif 'arch' in os_release:
+                            linux_distro = "arch"
+                        elif 'centos' in os_release or 'rhel' in os_release:
+                            linux_distro = "rhel"
+                        else:
+                            linux_distro = "other"
+                except FileNotFoundError:
+                    linux_distro = "unknown"
+            
             return SystemInfo(
                 os_name=os_name,
                 os_version=os_version,
                 architecture=architecture,
                 memory_gb=memory_gb,
                 disk_space_gb=disk_space_gb,
-                cpu_cores=cpu_cores
+                cpu_cores=cpu_cores,
+                is_ubuntu=is_ubuntu,
+                is_macos=is_macos,
+                linux_distro=linux_distro
             )
         except Exception as e:
-            self.logger.warning(f"Could not gather complete system info: {e}")
+            if self.logger:
+                self.logger.warning(f"Could not gather complete system info: {e}")
             return SystemInfo("Unknown", "Unknown", "Unknown", 0, 0, 1)
     
+    def _is_ubuntu(self) -> bool:
+        """Check if the current system is Ubuntu."""
+        return self.system_info.is_ubuntu
+
+    def _is_docker_mode(self) -> bool:
+        """Check if installation should use Docker (non-Ubuntu systems)."""
+        return not self._is_ubuntu()
+
     def validate_system(self) -> bool:
         """Validate system requirements."""
         self.logger.info("🔍 Validating system requirements...")
@@ -264,20 +309,32 @@ class CLIInstaller:
         if self.system_info.memory_gb < min_memory:
             issues.append(f"Insufficient memory: {self.system_info.memory_gb:.1f}GB < {min_memory}GB")
         
-        # Check Ubuntu version if applicable
-        if 'ubuntu' in self.system_info.os_name.lower():
-            required_version = validation_config.get('required_ubuntu_version', '24.04')
-            if required_version not in self.system_info.os_version:
-                self.logger.warning(f"Ubuntu version mismatch: {self.system_info.os_version} != {required_version}")
-        
         # Check architecture
-        supported_archs = validation_config.get('supported_architectures', ['amd64', 'arm64', 'aarch64'])
+        supported_archs = validation_config.get('supported_architectures', ['amd64', 'arm64', 'aarch64', 'x86_64'])
         if self.system_info.architecture not in supported_archs:
             issues.append(f"Unsupported architecture: {self.system_info.architecture}")
         
-        # Check sudo privileges
-        if os.geteuid() != 0:
-            issues.append("Script must be run with sudo privileges")
+        if self._is_ubuntu():
+            # Ubuntu-specific checks
+            required_version = validation_config.get('required_ubuntu_version', '24.04')
+            # Try to read actual Ubuntu version from /etc/os-release
+            try:
+                result = subprocess.run('lsb_release -rs', shell=True, capture_output=True, text=True)
+                ubuntu_ver = result.stdout.strip()
+                if ubuntu_ver and required_version not in ubuntu_ver:
+                    self.logger.warning(f"Ubuntu version mismatch: {ubuntu_ver} != {required_version}")
+            except Exception:
+                pass
+            
+            # Check sudo privileges (required for native install)
+            if os.geteuid() != 0:
+                issues.append("Script must be run with sudo privileges for native Ubuntu installation")
+        else:
+            # Docker mode — just need Docker or ability to install it
+            self.logger.info(f"🐳 Non-Ubuntu system detected ({self.system_info.os_name}), will use Docker")
+            docker_available = self._check_docker_installed()
+            if not docker_available:
+                self.logger.info("🐳 Docker not found — it will be installed automatically")
         
         if issues:
             for issue in issues:
@@ -291,10 +348,13 @@ class CLIInstaller:
         """Display comprehensive system information."""
         self.logger.info("📊 System Information:")
         self.logger.info(f"  • OS: {self.system_info.os_name} {self.system_info.os_version}")
+        if self.system_info.linux_distro:
+            self.logger.info(f"  • Linux Distro: {self.system_info.linux_distro}")
         self.logger.info(f"  • Architecture: {self.system_info.architecture}")
         self.logger.info(f"  • Memory: {self.system_info.memory_gb:.1f} GB")
         self.logger.info(f"  • Disk Space: {self.system_info.disk_space_gb:.1f} GB")
         self.logger.info(f"  • CPU Cores: {self.system_info.cpu_cores}")
+        self.logger.info(f"  • Install Mode: {'Native (Ubuntu)' if self._is_ubuntu() else 'Docker'}")
     
     def prompt_user_confirmation(self, silent: bool = False) -> bool:
         """Prompt user for installation confirmation."""
@@ -302,23 +362,37 @@ class CLIInstaller:
             return True
         
         self.logger.info("\n" + "="*60)
-        self.logger.info("🤖 ROS2 Kilted Kaiju Installation Summary")
+        self.logger.info("🤖 ROS2 Installation Summary")
         self.logger.info("="*60)
         
         config = self.config['installation']
         self.logger.info(f"  • ROS Distribution: {config['ros_distro']}")
         self.logger.info(f"  • Package Set: {config['package_set']}")
-        self.logger.info(f"  • Uninstall Existing: {config.get('uninstall_existing', True)}")
-        self.logger.info(f"  • Parallel Jobs: {config.get('parallel_jobs', 4)}")
+        
+        if self._is_docker_mode():
+            self.logger.info(f"  • Install Mode: 🐳 Docker container")
+            container_name = self.config.get('docker', {}).get('container_name', f"ros2-{config['ros_distro']}")
+            self.logger.info(f"  • Container Name: {container_name}")
+        else:
+            self.logger.info(f"  • Install Mode: Native Ubuntu")
+            self.logger.info(f"  • Uninstall Existing: {config.get('uninstall_existing', True)}")
+            self.logger.info(f"  • Parallel Jobs: {config.get('parallel_jobs', 4)}")
         
         self.display_system_info()
         
         self.logger.info("\n⚠️  This will modify your system by:")
-        self.logger.info("   - Installing ROS2 packages and dependencies")
-        self.logger.info("   - Adding ROS2 repositories")
-        self.logger.info("   - Modifying ~/.bashrc for environment setup")
-        if config.get('uninstall_existing', True):
-            self.logger.info("   - Removing existing ROS installations")
+        if self._is_docker_mode():
+            if not self._check_docker_installed():
+                self.logger.info("   - Installing Docker")
+            self.logger.info("   - Building a Docker image with ROS2")
+            self.logger.info("   - Creating a ROS2 Docker container")
+            self.logger.info("   - Installing a 'ros2' wrapper command")
+        else:
+            self.logger.info("   - Installing ROS2 packages and dependencies")
+            self.logger.info("   - Adding ROS2 repositories")
+            self.logger.info("   - Modifying ~/.bashrc for environment setup")
+            if config.get('uninstall_existing', True):
+                self.logger.info("   - Removing existing ROS installations")
         
         print("\n" + "="*60)
         response = input("🚀 Proceed with installation? [y/N]: ").strip().lower()
@@ -327,7 +401,7 @@ class CLIInstaller:
     @contextmanager
     def _rollback_on_failure(self):
         """Context manager for automatic rollback on failure."""
-        initial_state = self.installation_state.copy()
+        initial_state = copy.deepcopy(self.installation_state)
         try:
             yield
         except Exception as e:
@@ -351,7 +425,8 @@ class CLIInstaller:
         # Restore backup files
         for backup_file in self.installation_state.get('backup_files', []):
             try:
-                original_file = backup_file.replace('.backup', '')
+                # Strip the .backup.<session_id> suffix to recover the original path
+                original_file = backup_file.rsplit('.backup.', 1)[0]
                 if os.path.exists(backup_file):
                     os.rename(backup_file, original_file)
                     self.logger.info(f"Restored {original_file}")
@@ -374,7 +449,7 @@ class CLIInstaller:
                     command,
                     shell=True,
                     check=True,
-                    capture_output=False,
+                    capture_output=True,
                     timeout=timeout,
                     text=True
                 )
@@ -416,36 +491,434 @@ class CLIInstaller:
         except Exception as e:
             self.logger.warning(f"Failed to cleanup package processes: {e}")
     
-    def _install_package_parallel(self, packages: List[str]) -> Dict[str, bool]:
-        """Install packages in parallel."""
-        self.logger.info(f"📦 Installing {len(packages)} packages in parallel...")
+    def _install_package_sequential(self, packages: List[str]) -> Dict[str, bool]:
+        """Install packages sequentially (apt/dpkg does not support parallel installs)."""
+        self.logger.info(f"📦 Installing {len(packages)} packages...")
         
-        max_workers = min(self.config.get('installation', {}).get('parallel_jobs', 4), len(packages))
         results = {}
         
-        def install_single_package(package: str) -> Tuple[str, bool]:
+        for package in packages:
             try:
                 self._run_command(f"sudo apt-get install -y {package}", f"Installing {package}")
                 self.installation_state['packages_installed'].append(package)
-                return package, True
+                results[package] = True
             except Exception as e:
                 self.logger.error(f"Failed to install {package}: {e}")
-                return package, False
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_package = {executor.submit(install_single_package, pkg): pkg for pkg in packages}
-            
-            for future in concurrent.futures.as_completed(future_to_package):
-                package, success = future.result()
-                results[package] = success
+                results[package] = False
         
         successful = sum(1 for success in results.values() if success)
         self.logger.info(f"✅ Installed {successful}/{len(packages)} packages successfully")
         
         return results
     
+    # ─── Docker helper methods ───────────────────────────────────────
+
+    def _check_docker_installed(self) -> bool:
+        """Check if Docker is installed and accessible."""
+        try:
+            result = subprocess.run(
+                "docker --version", shell=True,
+                capture_output=True, text=True, timeout=10
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _check_docker_running(self) -> bool:
+        """Check if the Docker daemon is running."""
+        try:
+            result = subprocess.run(
+                "docker info", shell=True,
+                capture_output=True, text=True, timeout=15
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _install_docker(self):
+        """Install Docker on the current system."""
+        self.logger.info("🐳 Installing Docker...")
+
+        if self.system_info.is_macos:
+            self._install_docker_macos()
+        elif self.system_info.os_name == "Linux":
+            self._install_docker_linux()
+        else:
+            raise InstallationError(
+                f"Automatic Docker installation is not supported on {self.system_info.os_name}. "
+                "Please install Docker manually and re-run this installer."
+            )
+
+    def _install_docker_macos(self):
+        """Install Docker on macOS via Homebrew."""
+        # Check for Homebrew
+        if not shutil.which("brew"):
+            raise InstallationError(
+                "Homebrew is required to install Docker on macOS. "
+                "Install it from https://brew.sh and re-run this installer."
+            )
+
+        self.logger.info("🍺 Installing Docker via Homebrew...")
+        subprocess.run(
+            "brew install --cask docker",
+            shell=True, check=True, timeout=600
+        )
+
+        self.logger.info("🐳 Please open the Docker Desktop application to start the Docker daemon.")
+        self.logger.info("   Waiting for Docker daemon to become available...")
+        self._wait_for_docker_daemon()
+
+    def _install_docker_linux(self):
+        """Install Docker on a non-Ubuntu Linux distribution."""
+        distro = self.system_info.linux_distro
+
+        if distro in ("debian",):
+            cmds = [
+                "sudo apt-get update",
+                "sudo apt-get install -y ca-certificates curl gnupg",
+                "sudo install -m 0755 -d /etc/apt/keyrings",
+                "curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg",
+                "sudo chmod a+r /etc/apt/keyrings/docker.gpg",
+                'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] '
+                'https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" '
+                '| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null',
+                "sudo apt-get update",
+                "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+            ]
+        elif distro in ("fedora", "rhel"):
+            cmds = [
+                "sudo dnf -y install dnf-plugins-core",
+                "sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo",
+                "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+                "sudo systemctl start docker",
+                "sudo systemctl enable docker",
+            ]
+        elif distro == "arch":
+            cmds = [
+                "sudo pacman -Sy --noconfirm docker",
+                "sudo systemctl start docker",
+                "sudo systemctl enable docker",
+            ]
+        else:
+            raise InstallationError(
+                f"Automatic Docker installation is not supported on '{distro}'. "
+                "Please install Docker manually: https://docs.docker.com/engine/install/"
+            )
+
+        for cmd in cmds:
+            self.logger.debug(f"Running: {cmd}")
+            subprocess.run(cmd, shell=True, check=True, timeout=300)
+
+        self.logger.info("🐳 Docker installed successfully")
+        self._wait_for_docker_daemon()
+
+    def _wait_for_docker_daemon(self, timeout: int = 120):
+        """Wait for the Docker daemon to become responsive."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._check_docker_running():
+                self.logger.info("✅ Docker daemon is running")
+                return
+            time.sleep(3)
+        raise InstallationError(
+            "Docker daemon did not start within the timeout. "
+            "Please start Docker manually and re-run this installer."
+        )
+
+    def _get_ros_docker_image(self) -> str:
+        """Return the official Docker image tag for the selected distro and package set.
+
+        The official 'ros' images on Docker Hub provide ros-core and ros-base.
+        The 'osrf/ros' images provide desktop and desktop-full.
+        """
+        distro = self.config['installation']['ros_distro']
+        package_set = self.config['installation'].get('package_set', 'desktop-full')
+
+        # Official 'ros' repo has ros-core and ros-base tags
+        # OSRF 'osrf/ros' repo has desktop and desktop-full tags
+        image_map = {
+            'minimal':      f"ros:{distro}-ros-core",
+            'base':         f"ros:{distro}-ros-base",
+            'desktop':      f"osrf/ros:{distro}-desktop",
+            'desktop-full': f"osrf/ros:{distro}-desktop-full",
+        }
+        return image_map.get(package_set, f"osrf/ros:{distro}-desktop-full")
+
+    def _generate_dockerfile(self) -> str:
+        """Generate a Dockerfile for the requested ROS2 setup."""
+        base_image = self._get_ros_docker_image()
+        distro = self.config['installation']['ros_distro']
+        package_set = self.config['installation'].get('package_set', 'desktop-full')
+
+        # Build the list of extra apt packages for desktop variants
+        extra_apt_lines = ""
+        if package_set in ('desktop', 'desktop-full'):
+            extra_packages = [
+                f"ros-{distro}-gazebo-ros-pkgs",
+                f"ros-{distro}-navigation2",
+                f"ros-{distro}-moveit",
+                f"ros-{distro}-slam-toolbox",
+                f"ros-{distro}-robot-localization",
+            ]
+            extra_apt_lines = "".join(f"    {pkg} \\\n" for pkg in extra_packages)
+
+        # Build the dev-tools install line list
+        dev_packages = [
+            "python3-rosdep",
+            "python3-colcon-common-extensions",
+            "python3-vcstool",
+            "python3-argcomplete",
+            "python3-flake8",
+            "python3-pytest",
+        ]
+        dev_apt_lines = "".join(f"    {pkg} \\\n" for pkg in dev_packages)
+
+        dockerfile = (
+            f"# Auto-generated by ROS2 CLI Installer v{__version__}\n"
+            f"FROM {base_image}\n"
+            f"\n"
+            f"ENV DEBIAN_FRONTEND=noninteractive\n"
+            f"\n"
+            f"# Install development tools\n"
+            f"RUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+            f"{dev_apt_lines}"
+            f"{extra_apt_lines}"
+            f"    && rm -rf /var/lib/apt/lists/*\n"
+            f"\n"
+            f"# Initialize rosdep\n"
+            f"RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then \\\n"
+            f"      rosdep init; \\\n"
+            f"    fi && rosdep update\n"
+            f"\n"
+            f"# Setup entrypoint\n"
+            f"RUN echo '#!/bin/bash' > /ros_entrypoint.sh && \\\n"
+            f"    echo 'set -e' >> /ros_entrypoint.sh && \\\n"
+            f"    echo 'source /opt/ros/{distro}/setup.bash' >> /ros_entrypoint.sh && \\\n"
+            f"    echo 'exec \"$@\"' >> /ros_entrypoint.sh && \\\n"
+            f"    chmod +x /ros_entrypoint.sh\n"
+            f"\n"
+            f"ENTRYPOINT [\"/ros_entrypoint.sh\"]\n"
+            f"CMD [\"bash\"]\n"
+        )
+        return dockerfile
+
+    def _build_docker_image(self) -> str:
+        """Build the ROS2 Docker image and return its tag."""
+        distro = self.config['installation']['ros_distro']
+        image_tag = f"ros2-installer/{distro}:latest"
+
+        build_dir = Path.home() / ".ros2-installer" / "docker"
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+        dockerfile_path = build_dir / "Dockerfile"
+        dockerfile_path.write_text(self._generate_dockerfile())
+        self.logger.info(f"📝 Dockerfile written to {dockerfile_path}")
+
+        self.logger.info(f"🔨 Building Docker image '{image_tag}' — this may take a few minutes...")
+        subprocess.run(
+            f"docker build -t {image_tag} {build_dir}",
+            shell=True, check=True, timeout=1800
+        )
+        self.logger.info(f"✅ Docker image '{image_tag}' built successfully")
+        return image_tag
+
+    def _create_docker_container(self, image_tag: str) -> str:
+        """Create (or recreate) the persistent ROS2 Docker container."""
+        distro = self.config['installation']['ros_distro']
+        container_name = self.config.get('docker', {}).get(
+            'container_name', f"ros2-{distro}"
+        )
+        workspace_dir = self.config.get('docker', {}).get(
+            'workspace_dir', str(Path.home() / "ros2_ws")
+        )
+
+        # Ensure the host workspace directory exists
+        Path(workspace_dir).mkdir(parents=True, exist_ok=True)
+
+        # Remove existing container with the same name (if any)
+        subprocess.run(
+            f"docker rm -f {container_name} 2>/dev/null",
+            shell=True, capture_output=True
+        )
+
+        self.logger.info(f"🐳 Creating container '{container_name}'...")
+
+        docker_run_cmd = (
+            f"docker create "
+            f"--name {container_name} "
+            f"-it "
+            f"--network host "
+            f"-v {workspace_dir}:/root/ros2_ws "
+            f"-e DISPLAY=${{DISPLAY:-:0}} "
+            f"-e ROS_DOMAIN_ID=0 "
+            f"{image_tag} "
+            f"bash"
+        )
+
+        subprocess.run(docker_run_cmd, shell=True, check=True, timeout=60)
+        self.logger.info(f"✅ Container '{container_name}' created")
+        self.logger.info(f"   Host workspace mounted at: {workspace_dir} → /root/ros2_ws")
+        return container_name
+
+    def _create_ros2_wrapper_script(self, container_name: str):
+        """Install a host-side 'ros2' wrapper that forwards commands into the container."""
+        distro = self.config['installation']['ros_distro']
+
+        wrapper_content = f"""#!/usr/bin/env bash
+# ROS2 Docker wrapper — generated by ROS2 CLI Installer v{__version__}
+# Container: {container_name}
+set -e
+
+CONTAINER="{container_name}"
+
+# Start the container if it isn't running
+if [ "$(docker inspect -f '{{{{.State.Running}}}}' "$CONTAINER" 2>/dev/null)" != "true" ]; then
+    docker start "$CONTAINER" > /dev/null
+fi
+
+if [ $# -eq 0 ]; then
+    # No arguments — open an interactive shell inside the container
+    exec docker exec -it "$CONTAINER" bash
+else
+    # Forward the command into the container
+    exec docker exec -it "$CONTAINER" bash -ic "source /opt/ros/{distro}/setup.bash && ros2 $*"
+fi
+"""
+
+        # Determine install location
+        if self.system_info.is_macos:
+            bin_dir = Path.home() / ".local" / "bin"
+        else:
+            bin_dir = Path("/usr/local/bin")
+
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        wrapper_path = bin_dir / "ros2"
+        wrapper_path.write_text(wrapper_content)
+        wrapper_path.chmod(0o755)
+
+        self.logger.info(f"✅ Wrapper script installed at {wrapper_path}")
+
+        # Check if the directory is on PATH
+        if str(bin_dir) not in os.environ.get("PATH", ""):
+            shell_rc = self._get_shell_rc_path()
+            if shell_rc:
+                export_line = f'\nexport PATH="{bin_dir}:$PATH"  # Added by ROS2 CLI Installer\n'
+                try:
+                    existing = shell_rc.read_text() if shell_rc.exists() else ""
+                    if str(bin_dir) not in existing:
+                        with open(shell_rc, 'a') as f:
+                            f.write(export_line)
+                        self.logger.info(f"   Added {bin_dir} to PATH in {shell_rc}")
+                except Exception as e:
+                    self.logger.warning(f"   Could not update PATH in shell rc: {e}")
+            self.logger.info(f"   ⚠️  Make sure {bin_dir} is in your PATH")
+
+    def _get_shell_rc_path(self) -> Optional[Path]:
+        """Return the appropriate shell rc file for the current user."""
+        shell = os.environ.get("SHELL", "")
+        home = Path.home()
+        if "zsh" in shell:
+            return home / ".zshrc"
+        elif "bash" in shell:
+            if self.system_info.is_macos:
+                return home / ".bash_profile"
+            return home / ".bashrc"
+        return None
+
+    def _verify_docker_installation(self, container_name: str):
+        """Verify the Docker-based ROS2 installation."""
+        self.logger.info("✅ Verifying Docker-based ROS2 installation...")
+        distro = self.config['installation']['ros_distro']
+
+        # Start container
+        subprocess.run(
+            f"docker start {container_name}",
+            shell=True, check=True, capture_output=True, timeout=30
+        )
+
+        # Test ros2 command inside container
+        result = subprocess.run(
+            f"docker exec {container_name} bash -c 'source /opt/ros/{distro}/setup.bash && ros2 --help'",
+            shell=True, capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            raise InstallationError(
+                f"ROS2 verification failed inside container: {result.stderr}"
+            )
+
+        self.logger.info("✅ ROS2 is working inside the Docker container")
+
+    def install_ros2_docker(self, silent: bool = False) -> InstallationResult:
+        """Install ROS2 via Docker for non-Ubuntu systems."""
+        start_time = time.time()
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        try:
+            # Validate
+            if not self.validate_system():
+                raise ValidationError("System validation failed")
+
+            if not self.prompt_user_confirmation(silent):
+                self.logger.info("Installation cancelled by user")
+                return InstallationResult(False, 0, 0, ["Installation cancelled by user"], [], self.session_id)
+
+            # Step 1: Ensure Docker is installed
+            if not self._check_docker_installed():
+                self._install_docker()
+
+            # Step 2: Ensure Docker daemon is running
+            if not self._check_docker_running():
+                self._wait_for_docker_daemon()
+
+            # Step 3: Build the Docker image
+            image_tag = self._build_docker_image()
+
+            # Step 4: Create the container
+            container_name = self._create_docker_container(image_tag)
+
+            # Step 5: Install the wrapper script
+            self._create_ros2_wrapper_script(container_name)
+
+            # Step 6: Verify
+            self._verify_docker_installation(container_name)
+
+            duration = time.time() - start_time
+            distro = self.config['installation']['ros_distro']
+            self.logger.info(f"🎉 Docker-based ROS2 {distro} installation completed in {duration:.2f}s")
+
+            return InstallationResult(
+                success=True,
+                duration=duration,
+                packages_installed=1,  # Docker image counts as 1 logical package
+                errors=errors,
+                warnings=warnings,
+                session_id=self.session_id
+            )
+
+        except Exception as e:
+            duration = time.time() - start_time
+            self.logger.error(f"💥 Docker installation failed after {duration:.2f}s: {e}")
+            errors.append(str(e))
+            return InstallationResult(
+                success=False,
+                duration=duration,
+                packages_installed=0,
+                errors=errors,
+                warnings=warnings,
+                session_id=self.session_id
+            )
+
+    # ─── Main install entry point ─────────────────────────────────────
+
     def install_ros2(self, silent: bool = False) -> InstallationResult:
-        """Main installation method with comprehensive error handling."""
+        """Main installation method — routes to native or Docker based on OS."""
+        if self._is_docker_mode():
+            return self.install_ros2_docker(silent)
+        return self._install_ros2_native(silent)
+
+    def _install_ros2_native(self, silent: bool = False) -> InstallationResult:
+        """Native Ubuntu installation with comprehensive error handling."""
         start_time = time.time()
         errors = []
         warnings = []
@@ -536,7 +1009,7 @@ class CLIInstaller:
                                   shell=True, capture_output=True, text=True)
             if result.stdout.strip():
                 self.logger.info("Found existing ROS installations, removing...")
-                self._run_command("sudo apt-get autoremove -y ros-*", "Removing ROS packages")
+                self._run_command("sudo apt-get autoremove -y 'ros-*'", "Removing ROS packages")
                 self._run_command("sudo apt-get autoremove -y", "Cleaning up dependencies")
             else:
                 self.logger.info("No existing ROS installations found")
@@ -545,7 +1018,7 @@ class CLIInstaller:
     
     def _setup_repositories(self):
         """Setup ROS2 repositories."""
-        if not self.config.get('system', {}).get('add_repositories', True):
+        if not self.config.get('system', {}).get('install_dependencies', True):
             return
         
         self.logger.info("📁 Setting up ROS2 repositories...")
@@ -651,8 +1124,8 @@ class CLIInstaller:
             self.logger.warning("Could not determine original user for environment setup")
             return
         
-        user_home = f"/home/{original_user}"
-        bashrc_path = f"{user_home}/.bashrc"
+        user_home = os.path.expanduser(f"~{original_user}")
+        bashrc_path = os.path.join(user_home, ".bashrc")
         distro = self.config['installation']['ros_distro']
         
         # Backup existing bashrc
@@ -743,8 +1216,8 @@ Examples:
     
     parser.add_argument(
         '--config', '-c',
-        default='config.yaml',
-        help='Configuration file path (default: config.yaml)'
+        default='config_cli.yaml',
+        help='Configuration file path (default: config_cli.yaml)'
     )
     
     parser.add_argument(
@@ -845,8 +1318,13 @@ def main():
             installer.logger.info("🎉 Installation completed successfully!")
             installer.logger.info(f"📊 Summary: {result.packages_installed} packages installed in {result.duration:.2f} seconds")
             installer.logger.info(f"🆔 Session ID: {result.session_id}")
-            installer.logger.info("\n🚀 You can now use ROS2 commands in a new terminal session!")
-            installer.logger.info("   Try: source ~/.bashrc && ros2 topic list")
+            if installer._is_docker_mode():
+                installer.logger.info("\n🚀 ROS2 is ready via Docker!")
+                installer.logger.info("   Open a new terminal and run: ros2")
+                installer.logger.info("   Or run a ROS2 command: ros2 topic list")
+            else:
+                installer.logger.info("\n🚀 You can now use ROS2 commands in a new terminal session!")
+                installer.logger.info("   Try: source ~/.bashrc && ros2 topic list")
             sys.exit(0)
         else:
             installer.logger.error("💥 Installation failed!")
